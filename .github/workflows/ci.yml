@@ -1,0 +1,49 @@
+name: BARQ DevOps CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    env:
+      POSTGRES_PASSWORD: ci-test-password
+      DATABASE_URL: postgresql://barq_app:ci-test-password@postgres:5432/barq_tasks
+      REDIS_URL: redis://redis:6379/0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Python syntax
+        run: |
+          python3 -m py_compile \
+            app/server.py \
+            validate.py \
+            failure_test.py
+
+      - name: Validate Docker Compose
+        run: docker compose config -q
+
+      - name: Build application images
+        run: docker compose build
+
+      - name: Start environment
+        run: docker compose up -d
+
+      - name: Wait for readiness
+        run: |
+          timeout 60s bash -c '
+            until curl -fsS http://127.0.0.1:8080/ready; do
+              sleep 2
+            done
+          '
+
+      - name: Validate environment
+        run: python3 validate.py
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
